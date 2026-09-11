@@ -645,7 +645,7 @@ const TYPE_LABELS = {
   savings_in: 'Ahorro +', savings_out: 'Ahorro -', debt_payment: 'Pago Deuda'
 };
 const SOURCE_LABELS = { debito: 'Cuenta Debito', efectivo: 'Efectivo', ahorro: 'Ahorro' };
-const DEBT_CATEGORIES = ['Prestamo Personal','Tarjeta de Credito','Prestamo Familiar','Servicio','Compra a Plazos','Educacion','Salud','Otro'];
+const DEBT_PAYMENT_METHODS = ['Tarjeta de Credito','Debito','Efectivo'];
 
 /* ======== DATA ======== */
 let data = { transactions: [], debts: [], settings: { darkMode: true }, balances: {
@@ -1037,29 +1037,45 @@ function saveExpense(editId) {
 
 /* ======== DEBT FORMS ======== */
 function showCreateDebtForm() {
+  const catOpts = Object.keys(CATEGORIES).map(c => '<option value="'+c+'">'+c+'</option>').join('');
+  const methodOpts = DEBT_PAYMENT_METHODS.map(m => '<option value="'+m+'">'+m+'</option>').join('');
   const html = `
     <div class="modal-header"><h3>Nueva Deuda / Pasivo</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
     <div class="modal-body">
-      <div class="form-group"><label>Nombre / Acreedor *</label><input type="text" class="form-control" id="debt-name" placeholder="Ej: Banco XYZ, Prestamo Juan..."></div>
+      <div class="form-group"><label>Nombre / Descripcion *</label><input type="text" class="form-control" id="debt-name" placeholder="Ej: Compra en Ripley, Prestamo Juan..."></div>
       <div class="form-row">
         <div class="form-group"><label>Monto Total *</label><input type="number" class="form-control" id="debt-amount" step="0.01" min="0.01" placeholder="0.00"></div>
         <div class="form-group"><label>Moneda *</label><select class="form-control" id="debt-currency"><option value="PEN">PEN (S/)</option><option value="USD">USD ($)</option></select></div>
       </div>
-      <div class="form-group"><label>Categoria *</label><select class="form-control" id="debt-category">${DEBT_CATEGORIES.map(c=>'<option value="'+c+'">'+c+'</option>').join('')}</select></div>
+      <div class="form-group"><label>Medio de Pago Original *</label><select class="form-control" id="debt-method">${methodOpts}</select></div>
+      <div class="form-group"><label>Categoria *</label><select class="form-control" id="debt-category" onchange="onDebtCatChange()">${catOpts}</select></div>
+      <div class="form-group" id="debt-subcat-wrap" style="display:none"><label>Subcategoria</label><select class="form-control" id="debt-subcategory"><option value="">Sin subcategoria</option></select></div>
       <div class="form-group"><label>Fecha</label><input type="date" class="form-control" id="debt-date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="form-group"><label>Notas</label><textarea class="form-control" id="debt-notes" placeholder="Notas opcionales..."></textarea></div>
     </div>
     <div class="modal-footer"><button class="btn btn-primary btn-block" onclick="saveDebt()">Crear Deuda</button></div>`;
   openModal(html);
+  onDebtCatChange();
+}
+function onDebtCatChange(preselect) {
+  const cat = document.getElementById('debt-category').value;
+  const subSel = document.getElementById('debt-subcategory');
+  const subs = CATEGORIES[cat] || [];
+  subSel.innerHTML = '<option value="">Sin subcategoria</option>' + subs.map(s => '<option value="'+s+'" '+(preselect===s?'selected':'')+'>'+s+'</option>').join('');
+  document.getElementById('debt-subcat-wrap').style.display = subs.length ? 'block' : 'none';
 }
 function saveDebt() {
   const name = document.getElementById('debt-name').value.trim();
   const amount = parseFloat(document.getElementById('debt-amount').value);
   const currency = document.getElementById('debt-currency').value;
+  const method = document.getElementById('debt-method').value;
+  const category = document.getElementById('debt-category').value;
+  const subcategory = document.getElementById('debt-subcategory') ? document.getElementById('debt-subcategory').value : '';
   const date = document.getElementById('debt-date').value;
-  const debtCategory = document.getElementById('debt-category').value;
+  const notes = document.getElementById('debt-notes') ? document.getElementById('debt-notes').value.trim() : '';
   if (!name) { showToast('Ingresa el nombre','error'); return; }
   if (!amount || amount <= 0) { showToast('Ingresa un monto valido','error'); return; }
-  data.debts.push({ id:genId(), name, totalAmount:amount, currency, category:debtCategory, paidAmount:0, date, status:'active', createdAt:new Date().toISOString() });
+  data.debts.push({ id:genId(), name, totalAmount:amount, currency, method, category, subcategory:subcategory||null, notes, paidAmount:0, date, status:'active', createdAt:new Date().toISOString() });
   saveData(); closeModal();
   showToast('Deuda creada');
   renderCurrentView();
@@ -1156,8 +1172,8 @@ function saveMultiPayDebt() {
     if (!debt) return;
     data.transactions.push({
       id:genId(), type:'debt_payment', amount, currency:debt.currency,
-      source, destination:null, category:'Pago Deuda', subcategory:debt.name,
-      incomeType:null, debtId:dId, date, notes, createdAt:new Date().toISOString()
+      source, destination:null, category:debt.category||'Pago Deuda', subcategory:debt.subcategory||debt.name,
+      incomeType:null, debtId:dId, date, notes:notes||(debt.name+' - '+(debt.method||'')), createdAt:new Date().toISOString()
     });
     count++;
   });
@@ -1177,8 +1193,8 @@ function savePayDebt(editId) {
   if (!debt) { showToast('Deuda no encontrada','error'); return; }
   const tx = {
     id: editId || genId(), type:'debt_payment', amount, currency:debt.currency,
-    source, destination:null, category:'Pago Deuda', subcategory:debt.name,
-    incomeType:null, debtId, date, notes, createdAt: editId ? undefined : new Date().toISOString()
+    source, destination:null, category:debt.category||'Pago Deuda', subcategory:debt.subcategory||debt.name,
+    incomeType:null, debtId, date, notes:notes||(debt.name+' - '+debt.method), createdAt: editId ? undefined : new Date().toISOString()
   };
   if (editId) {
     const idx = data.transactions.findIndex(t=>t.id===editId);
